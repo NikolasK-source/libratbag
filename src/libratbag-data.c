@@ -63,6 +63,7 @@ enum driver {
 	SINOWEALTH_NUBWO,
 	OPENINPUT,
 	MARSGAMING,
+	PULSAR,
 };
 
 struct data_hidpp20 {
@@ -109,6 +110,10 @@ struct data_asus {
 	int led_modes[ASUS_MAX_NUM_LED_MODES];
 };
 
+struct data_pulsar {
+	int polling;
+};
+
 struct ratbag_device_data {
 	int refcount;
 	char *name;
@@ -123,6 +128,7 @@ struct ratbag_device_data {
 		struct data_sinowealth sinowealth;
 		struct data_steelseries steelseries;
 		struct data_asus asus;
+		struct data_pulsar pulsar;
 	};
 };
 
@@ -474,6 +480,23 @@ init_data_asus(struct ratbag *ratbag,
 	g_clear_error(&error);
 }
 
+static void
+init_data_pulsar(struct ratbag *ratbag,
+		GKeyFile *keyfile,
+		struct ratbag_device_data *data)
+{
+	const char *group = "Driver/pulsar";
+	GError *error = NULL;
+
+	int polling = g_key_file_get_integer(keyfile, group, "Polling", &error);
+	if (!error && polling >= 0)
+		data->pulsar.polling = polling;
+	else
+		data->pulsar.polling = 1;  // fallback to 1kHz
+
+	g_clear_error(&error);
+}
+
 static const struct driver_map {
 	enum driver map;
 	const char *driver;
@@ -496,6 +519,7 @@ static const struct driver_map {
 	{ SINOWEALTH_NUBWO, "sinowealth_nubwo", NULL},
 	{ OPENINPUT, "openinput", NULL },
 	{ MARSGAMING, "marsgaming", NULL },
+	{ PULSAR, "pulsar", init_data_pulsar },
 };
 
 const char *
@@ -969,4 +993,11 @@ ratbag_device_data_asus_get_quirks(const struct ratbag_device_data *data)
 {
 	assert(data->drivertype == ASUS);
 	return data->asus.quirks;
+}
+
+int
+ratbag_device_data_pulsar_get_polling(const struct ratbag_device_data *data)
+{
+	assert(data->drivertype == PULSAR);
+	return data->pulsar.polling;
 }

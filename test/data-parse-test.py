@@ -259,6 +259,12 @@ def check_section_steelseries(section: configparser.SectionProxy):
         pass
 
 
+def check_section_pulsar(section: configparser.SectionProxy):
+    permitted_keys = ("Polling",)
+    for key in section:
+        assert key in permitted_keys
+
+
 def check_section_driver(driver: str, section: configparser.SectionProxy):
     if driver == "asus":
         check_section_asus(section)
@@ -274,6 +280,10 @@ def check_section_driver(driver: str, section: configparser.SectionProxy):
 
     if driver == "steelseries":
         check_section_steelseries(section)
+        return
+
+    if driver == "pulsar":
+        check_section_pulsar(section)
         return
 
     raise ValueError(f"Unsupported driver section {driver}")

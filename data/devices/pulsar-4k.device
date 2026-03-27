@@ -1,0 +1,8 @@
+[Device]
+Name=Pulsar X2V2 / XliteV3 / X2A / X2H
+DeviceMatch=usb:3554:f509
+Driver=pulsar
+DeviceType=mouse
+
+[Driver/pulsar]
+Polling=4

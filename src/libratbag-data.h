@@ -193,3 +193,9 @@ ratbag_device_data_asus_is_wireless(const struct ratbag_device_data *data);
  */
 uint32_t
 ratbag_device_data_asus_get_quirks(const struct ratbag_device_data *data);
+
+/**
+ * @return polling rate in kHz
+ */
+int
+ratbag_device_data_pulsar_get_polling(const struct ratbag_device_data *data);
