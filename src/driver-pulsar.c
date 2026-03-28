@@ -136,6 +136,14 @@
 #define PULSAR_LED_STEADY		0x01
 #define PULSAR_LED_BREATHE		0x02
 
+/* Breathe speed mapping: speed 1-5, linear ms = -1500*speed + 10000 */
+#define MIN_BREATH_SPEED		1
+#define MAX_BREATH_SPEED		5
+#define BREATHE_SPEED_SLOPE		1500
+#define BREATHE_SPEED_OFFSET		10000
+#define MIN_BREATHE_PERIOD_MS		(-BREATHE_SPEED_SLOPE * MAX_BREATH_SPEED + BREATHE_SPEED_OFFSET)
+#define MAX_BREATHE_PERIOD_MS		(-BREATHE_SPEED_SLOPE * MIN_BREATH_SPEED + BREATHE_SPEED_OFFSET)
+
 /* Combinations */
 #define PULSAR_COMB_BASE_ADDR		0x0100
 #define PULSAR_COMB_NUM_ACTIONS		10
@@ -721,9 +729,12 @@ pulsar_write_led(struct ratbag_device *device, const struct ratbag_led *led)
 		return rc;
 
 	if (led->mode == RATBAG_LED_BREATHING) {
-		unsigned int speed = 6 - (led->ms / 1000);
-		if (speed < 1) speed = 1;
-		if (speed > 5) speed = 5;
+		int ms = led->ms;
+		if (ms < MIN_BREATHE_PERIOD_MS) ms = MIN_BREATHE_PERIOD_MS;
+		if (ms > MAX_BREATHE_PERIOD_MS) ms = MAX_BREATHE_PERIOD_MS;
+		unsigned int speed = (BREATHE_SPEED_OFFSET - ms +
+				      BREATHE_SPEED_SLOPE / 2) /
+				     BREATHE_SPEED_SLOPE;
 
 		rc = pulsar_write_setting_byte(device,
 					       PULSAR_ADDR_LED_BREATHE_SPEED,
@@ -1247,10 +1258,10 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 
 			led->brightness = brightness;
 
-			if (speed >= 1 && speed <= 5)
-				led->ms = (6 - speed) * 1000;
+			if (speed >= MIN_BREATH_SPEED && speed <= MAX_BREATH_SPEED)
+				led->ms = BREATHE_SPEED_OFFSET - BREATHE_SPEED_SLOPE * speed;
 			else
-				led->ms = 3000;
+				led->ms = (MIN_BREATHE_PERIOD_MS + MAX_BREATHE_PERIOD_MS) / 2;
 
 			log_debug(profile->device->ratbag,
 				  "  led effect: mode=%d brightness=%u ms=%u\n",
