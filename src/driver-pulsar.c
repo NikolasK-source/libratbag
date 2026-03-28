@@ -1209,6 +1209,18 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 		}
 	}
 
+	/* verify button assignment checksums (3 bytes + checksum) */
+	for (unsigned int i = 0; i < PULSAR_NUM_BUTTONS_X2A; i++) {
+		const uint16_t btn_addr = PULSAR_ADDR_BUTTON_BASE + i * 4;
+		if (!pulsar_verify_setting(settings, btn_addr, 3)) {
+			log_error(profile->device->ratbag,
+				"invalid checksum for button %u at 0x%04x\n",
+				i, btn_addr);
+			ret = -EIO;
+			goto out;
+		}
+	}
+
 	/* ----- parse settings ----- */
 	/* polling rate */
 	profile->hz = pulsar_polling_rate_to_hz(settings[PULSAR_ADDR_POLLING_RATE]);
@@ -2014,6 +2026,16 @@ pulsar_encode_action(const struct ratbag_device *device,
 		*code = press ? PULSAR_ACTION_KEY_PRESS
 			      : PULSAR_ACTION_KEY_RELEASE;
 		*value = htole16(hid);
+		return true;
+	}
+
+	/* consumer/multimedia keys */
+	const unsigned int consumer =
+		ratbag_hidraw_get_consumer_usage_from_keycode(device, key);
+	if (consumer) {
+		*code = press ? PULSAR_ACTION_CONSUMER_PRESS
+			      : PULSAR_ACTION_CONSUMER_RELEASE;
+		*value = htole16(consumer);
 		return true;
 	}
 
