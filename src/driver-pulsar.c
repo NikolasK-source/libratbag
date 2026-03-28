@@ -505,8 +505,8 @@ pulsar_read_info(struct ratbag_device *device,
 		if (actual != expected)
 		{
 			log_error(device->ratbag,
-				"device info[%lu] mismatch: %02x != %02x\n",
-				i, expected, actual);
+				"%s: device info[%lu] mismatch: %02x != %02x\n",
+				__func__, i, expected, actual);
 			return -1;
 		}
 	}
@@ -770,8 +770,8 @@ pulsar_read_combination (struct ratbag_device *device,
 	// invalid count
 	if (combination->count > PULSAR_COMB_NUM_ACTIONS) {
 		log_error(device->ratbag,
-			"invalid combination count %u profile=%lu index=%lu\n",
-			combination->count, profile, index);
+			"%s: invalid combination count %u profile=%lu index=%lu\n",
+			__func__, combination->count, profile, index);
 		combination->count = 0;
 		return -EIO;
 	}
@@ -784,8 +784,8 @@ pulsar_read_combination (struct ratbag_device *device,
 	const uint8_t actual = ((uint8_t *)combination)[chk_len];
 	if (expected != actual) {
 		log_error(device->ratbag,
-			"invalid combination checksum %02x != %02x profile=%lu index=%lu\n",
-			expected, actual, profile, index);
+			"%s: invalid combination checksum %02x != %02x profile=%lu index=%lu\n",
+			__func__, expected, actual, profile, index);
 		combination->count = 0;
 	}
 
@@ -834,8 +834,8 @@ pulsar_read_macro (struct ratbag_device *device,
 	const uint8_t checksum = *((uint8_t *)macro + chk_offset + chk_len);
 	if (expected != checksum) {
 		log_error(device->ratbag,
-			"invalid macro checksum %02x != %02x profile=%lu index=%lu\n",
-			expected, checksum, profile, index);
+			"%s: invalid macro checksum %02x != %02x profile=%lu index=%lu\n",
+			__func__, expected, checksum, profile, index);
 		macro->num_actions = 0;
 	}
 
@@ -1125,8 +1125,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 	/* occurs if user presses the profile change button */
 	if (drv_data->profile_changed != profile_changed_before) {
 		log_error(profile->device->ratbag,
-			"profile changed during read, aborting (%zu -> %zu)\n",
-			profile_changed_before, drv_data->profile_changed);
+			"%s: profile changed during read, aborting (%zu -> %zu)\n",
+			__func__, profile_changed_before, drv_data->profile_changed);
 		state_changed = true;
 	}
 
@@ -1134,8 +1134,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 	/* occurs if user presses the dpi change button */
 	if (drv_data->dpi_changed != dpi_changed_before) {
 		log_error(profile->device->ratbag,
-			"dpi changed during read, aborting (%zu -> %zu)\n",
-			dpi_changed_before, drv_data->dpi_changed);
+			"%s: dpi changed during read, aborting (%zu -> %zu)\n",
+			__func__, dpi_changed_before, drv_data->dpi_changed);
 		state_changed = true;
 	}
 
@@ -1145,7 +1145,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 		ret = pulsar_write_active_profile(profile->device, active_profile);
 		if (ret < 0) {
 			log_error(profile->device->ratbag,
-				"failed to restore active profile (%d)\n", ret);
+				"%s: failed to restore active profile (%d)\n",
+				__func__, ret);
 			// parse settings even if profile restore failed
 		} else {
 			log_debug(profile->device->ratbag,
@@ -1179,8 +1180,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 		if (!pulsar_verify_setting(settings, setting_checksums[i].addr,
 				setting_checksums[i].len)) {
 			log_error(profile->device->ratbag,
-				"invalid checksum for %s at 0x%04x\n",
-				setting_checksums[i].name,
+				"%s: invalid checksum for %s at 0x%04x\n",
+				__func__, setting_checksums[i].name,
 				setting_checksums[i].addr);
 			ret = -EIO;
 			goto out;
@@ -1193,8 +1194,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 		const uint16_t dpi_addr = PULSAR_ADDR_DPI_BASE + i * 4;
 		if (!pulsar_verify_setting(settings, dpi_addr, 3)) {
 			log_error(profile->device->ratbag,
-				"invalid checksum for dpi mode %u at 0x%04x\n",
-				i, dpi_addr);
+				"%s: invalid checksum for dpi mode %u at 0x%04x\n",
+				__func__, i, dpi_addr);
 			ret = -EIO;
 			goto out;
 		}
@@ -1202,8 +1203,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 		const uint16_t color_addr = PULSAR_ADDR_DPI_COLOR_BASE + i * 4;
 		if (!pulsar_verify_setting(settings, color_addr, 3)) {
 			log_error(profile->device->ratbag,
-				"invalid checksum for dpi color %u at 0x%04x\n",
-				i, color_addr);
+				"%s: invalid checksum for dpi color %u at 0x%04x\n",
+				__func__, i, color_addr);
 			ret = -EIO;
 			goto out;
 		}
@@ -1214,8 +1215,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 		const uint16_t btn_addr = PULSAR_ADDR_BUTTON_BASE + i * 4;
 		if (!pulsar_verify_setting(settings, btn_addr, 3)) {
 			log_error(profile->device->ratbag,
-				"invalid checksum for button %u at 0x%04x\n",
-				i, btn_addr);
+				"%s: invalid checksum for button %u at 0x%04x\n",
+				__func__, i, btn_addr);
 			ret = -EIO;
 			goto out;
 		}
@@ -1379,8 +1380,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 		}
 		default:
 			log_error(profile->device->ratbag,
-				  "  button %u: unknown mode %02x\n",
-				  bi, mode);
+				  "%s: button %u: unknown mode %02x\n",
+				  __func__, bi, mode);
 			button->action.type = RATBAG_BUTTON_ACTION_TYPE_UNKNOWN;
 			break;
 		}
@@ -1668,15 +1669,15 @@ pulsar_macro_is_valid(const struct ratbag_device *device,
 			for (unsigned int j = 0; j < num_pressed; j++) {
 				if (pressed[j] == ev->event.key) {
 					log_error(device->ratbag,
-						"invalid macro: key %u pressed again at event %u\n",
-						ev->event.key, i);
+						"%s: key %u pressed again at event %u\n",
+						__func__, ev->event.key, i);
 					return false;
 				}
 			}
 			if (num_pressed >= ARRAY_LENGTH(pressed)) {
 				log_error(device->ratbag,
-					"invalid macro: too many keys pressed simultaneously at event %u\n",
-					i);
+					"%s: too many keys pressed simultaneously at event %u\n",
+					__func__, i);
 				return false;
 			}
 			pressed[num_pressed++] = ev->event.key;
@@ -1685,8 +1686,8 @@ pulsar_macro_is_valid(const struct ratbag_device *device,
 			if (ratbag_hidraw_get_consumer_usage_from_keycode(
 				    device, ev->event.key)) {
 				log_error(device->ratbag,
-					"invalid macro: consumer key %u at event %u\n",
-					ev->event.key, i);
+					"%s: consumer key %u at event %u\n",
+					__func__, ev->event.key, i);
 				return false;
 			}
 			break;
@@ -1701,8 +1702,8 @@ pulsar_macro_is_valid(const struct ratbag_device *device,
 			}
 			if (!found) {
 				log_error(device->ratbag,
-					"invalid macro: key %u released without press at event %u\n",
-					ev->event.key, i);
+					"%s: key %u released without press at event %u\n",
+					__func__, ev->event.key, i);
 				return false;
 			}
 			actions++;
@@ -1710,8 +1711,8 @@ pulsar_macro_is_valid(const struct ratbag_device *device,
 			if (ratbag_hidraw_get_consumer_usage_from_keycode(
 				    device, ev->event.key)) {
 				log_error(device->ratbag,
-					"invalid macro: consumer key %u at event %u\n",
-					ev->event.key, i);
+					"%s: consumer key %u at event %u\n",
+					__func__, ev->event.key, i);
 				return false;
 			}
 			break;
@@ -1720,8 +1721,8 @@ pulsar_macro_is_valid(const struct ratbag_device *device,
 			pending_delay += ev->event.timeout;
 			if (pending_delay > UINT16_MAX) {
 				log_error(device->ratbag,
-					"invalid macro: cumulative delay %u exceeds limit at event %u\n",
-					pending_delay, i);
+					"%s: cumulative delay %u exceeds limit at event %u\n",
+					__func__, pending_delay, i);
 				return false;
 			}
 			break;
@@ -1863,8 +1864,8 @@ pulsar_check_button(const struct ratbag_device *device,
 		break;
 	default:
 		log_error(device->ratbag,
-			"  button %d: unsupported action type %d\n",
-			button->index, button->action.type);
+			"%s: button %d: unsupported action type %d\n",
+			__func__, button->index, button->action.type);
 		return RATBAG_ERROR_VALUE;
 	}
 
@@ -2438,7 +2439,8 @@ pulsar_commit(struct ratbag_device *device)
 		int rc2 = pulsar_write_active_profile(device, original_profile);
 		if (rc2 < 0)
 			log_error(device->ratbag,
-				  "commit: failed to restore active profile\n");
+				  "%s: failed to restore active profile\n",
+				  __func__);
 	}
 
 	return rc;
