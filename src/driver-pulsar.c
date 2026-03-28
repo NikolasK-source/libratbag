@@ -767,6 +767,15 @@ pulsar_read_combination (struct ratbag_device *device,
 		return 0;
 	}
 
+	// invalid count
+	if (combination->count > PULSAR_COMB_NUM_ACTIONS) {
+		log_error(device->ratbag,
+			"invalid combination count %u profile=%lu index=%lu\n",
+			combination->count, profile, index);
+		combination->count = 0;
+		return -EIO;
+	}
+
 	// verify checksum (covers count byte + used actions only)
 	const size_t chk_len = 1 + combination->count *
 		sizeof(*combination->actions);
@@ -2110,15 +2119,22 @@ pulsar_commit_btn_macro(struct ratbag_device *device,
 		if (ai >= PULSAR_MACRO_NUM_ACTIONS)
 			return RATBAG_ERROR_VALUE;
 
+		/* attach accumulated delay to the previous action */
+		if (ai > 0)
+			mac.actions[ai - 1].delay = htobe16(pending_delay);
+		pending_delay = 0;
+
 		if (!pulsar_encode_action(device, ev,
 					  &mac.actions[ai].code,
 					  &mac.actions[ai].value))
 			return RATBAG_ERROR_VALUE;
 
-		mac.actions[ai].delay = htobe16(pending_delay);
-		pending_delay = 0;
 		ai++;
 	}
+
+	/* attach trailing delay to the last action */
+	if (ai > 0 && pending_delay > 0)
+		mac.actions[ai - 1].delay = htobe16(pending_delay);
 
 	mac.num_actions = ai;
 
@@ -2550,7 +2566,7 @@ pulsar_reset (struct ratbag_device* device) {
 		}
 		if (rc < 0)
 			return rc;
-		return 0;
+		break;
 	}
 
 	if (rc < 0)
