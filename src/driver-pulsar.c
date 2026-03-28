@@ -756,13 +756,16 @@ pulsar_read_combination (struct ratbag_device *device,
 		return 0;
 	}
 
-	// verify checksum
+	// verify checksum (covers count byte + used actions only)
+	const size_t chk_len = 1 + combination->count *
+		sizeof(*combination->actions);
 	const uint8_t expected = pulsar_checksum((uint8_t *)combination,
-		sizeof(*combination) - 1);
-	if (expected != combination->checksum) {
+		chk_len);
+	const uint8_t actual = ((uint8_t *)combination)[chk_len];
+	if (expected != actual) {
 		log_error(device->ratbag,
 			"invalid combination checksum %02x != %02x profile=%lu index=%lu\n",
-			expected, combination->checksum, profile, index);
+			expected, actual, profile, index);
 		combination->count = 0;
 	}
 
@@ -802,10 +805,13 @@ pulsar_read_macro (struct ratbag_device *device,
 	if (ret < 0)
 		return ret;
 
-	// verify checksum
-	const uint8_t expected = pulsar_checksum((uint8_t *)macro,
-		action_offset + action_size - 1);
-	const uint8_t checksum = *(((uint8_t *) macro) + action_offset + action_size - 1);
+	// verify checksum (covers action section only: num_actions + actions)
+	const size_t chk_offset = offsetof(struct pulsar_macro, num_actions);
+	const size_t chk_len = 1 + sizeof(*macro->actions) *
+		min(macro->num_actions, PULSAR_MACRO_NUM_ACTIONS);
+	const uint8_t expected = pulsar_checksum(
+		(uint8_t *)macro + chk_offset, chk_len);
+	const uint8_t checksum = *((uint8_t *)macro + chk_offset + chk_len);
 	if (expected != checksum) {
 		log_error(device->ratbag,
 			"invalid combination checksum %02x != %02x profile=%lu index=%lu\n",
@@ -1058,7 +1064,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 	/* read combinations */
 	for (size_t i = 0; i < PULSAR_NUM_BUTTONS_X2A; i++) {
 		ret = pulsar_read_combination(profile->device,
-			drv_data->memory->combination + i, i, profile->index);
+			drv_data->memory[profile->index].combination + i,
+			i, profile->index);
 		if (ret < 0)
 			goto out;
 	}
@@ -1066,7 +1073,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 	/* read macros */
 	for (size_t i = 0; i < PULSAR_NUM_MACROS; i++) {
 		ret = pulsar_read_macro(profile->device,
-			drv_data->memory->macro + i, i, profile->index);
+			drv_data->memory[profile->index].macro + i,
+			i, profile->index);
 		if (ret < 0)
 			goto out;
 	}
@@ -1472,6 +1480,8 @@ pulsar_probe(struct ratbag_device *device)
 		}
 	}
 
+	free(report_rates);
+
 	// check if device is alive
 	size_t retries = DRV_INIT_RETRY;
 	do {
@@ -1538,6 +1548,7 @@ pulsar_macro_is_combo(const struct ratbag_device *device,
 		switch (macro->events[i].type) {
 		case RATBAG_MACRO_EVENT_KEY_PRESSED:
 			presses++;
+			// fallthrough
 		case RATBAG_MACRO_EVENT_KEY_RELEASED:
 			if (macro->events[i].event.key >= BTN_MOUSE &&
 			    macro->events[i].event.key <= BTN_TASK) {
@@ -1989,8 +2000,9 @@ pulsar_commit_btn_combo(struct ratbag_device *device,
 	}
 
 	comb.count = ai;
-	comb.checksum = pulsar_checksum((uint8_t *)&comb,
-					sizeof(comb) - 1);
+	size_t chk_len = 1 + ai * sizeof(*comb.actions);
+	((uint8_t *)&comb)[chk_len] = pulsar_checksum((uint8_t *)&comb,
+						       chk_len);
 
 	const uint16_t addr =
 		PULSAR_COMB_BASE_ADDR + button_index * sizeof(comb);
@@ -2367,7 +2379,7 @@ pulsar_handle_dpi_event(struct ratbag_device *device)
 
 	struct ratbag_profile *profile = ratbag_device_get_profile(device, p);
 	ratbag_profile_get_resolution(profile, prev_dpi)->is_active = false;
-	ratbag_profile_get_resolution(profile, dpi_mode)->is_active = false;
+	ratbag_profile_get_resolution(profile, dpi_mode)->is_active = true;
 	drv_data->memory[p].settings[PULSAR_ADDR_ACTIVE_DPI_MODE] = dpi_mode;
 
 	log_info(device->ratbag,
