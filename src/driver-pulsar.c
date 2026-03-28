@@ -1004,7 +1004,8 @@ pulsar_parse_btn_combo(const struct ratbag_profile *profile,
 static void
 pulsar_parse_btn_macro(const struct ratbag_profile *profile,
 		       struct ratbag_button *button,
-		       const struct pulsar_macro *mac)
+		       const struct pulsar_macro *mac,
+		       uint8_t repeat_param)
 {
 	const unsigned int bi = button->index;
 	struct ratbag_button_macro *m = ratbag_button_macro_new("macro");
@@ -1022,6 +1023,25 @@ pulsar_parse_btn_macro(const struct ratbag_profile *profile,
 			ratbag_button_macro_set_event(
 				m, ei++, RATBAG_MACRO_EVENT_WAIT, delay);
 		}
+	}
+
+	switch (repeat_param) {
+	case 0xFE:
+		ratbag_button_macro_set_repeat(m,
+			RATBAG_MACRO_REPEAT_WHILE_HELD, 0);
+		break;
+	case 0xFF:
+		ratbag_button_macro_set_repeat(m,
+			RATBAG_MACRO_REPEAT_UNTIL_BUTTON_PRESSED, 0);
+		break;
+	default:
+		if (repeat_param > 1)
+			ratbag_button_macro_set_repeat(m,
+				RATBAG_MACRO_REPEAT_COUNT, repeat_param);
+		else
+			ratbag_button_macro_set_repeat(m,
+				RATBAG_MACRO_REPEAT_ONCE, 0);
+		break;
 	}
 
 	ratbag_button_copy_macro(button, m);
@@ -1321,7 +1341,8 @@ pulsar_read_profile_settings(struct ratbag_profile *profile)
 				break;
 			}
 			pulsar_parse_btn_macro(profile, button,
-				&drv_data->memory[profile->index].macro[slot]);
+				&drv_data->memory[profile->index].macro[slot],
+				param2);
 			break;
 		}
 		default:
@@ -1541,6 +1562,13 @@ static bool
 pulsar_macro_is_combo(const struct ratbag_device *device,
 		      const struct ratbag_macro *macro)
 {
+	if (macro->repeat_mode == RATBAG_MACRO_REPEAT_COUNT &&
+	    macro->repeat_count != 1)
+		return false;
+	if (macro->repeat_mode != RATBAG_MACRO_REPEAT_ONCE &&
+	    macro->repeat_mode != RATBAG_MACRO_REPEAT_COUNT)
+		return false;
+
 	unsigned int count = 0;
 	unsigned int presses = 0;
 
@@ -1710,10 +1738,30 @@ pulsar_check_macro(const struct ratbag_device *device,
 	if (pulsar_macro_is_combo(device, macro))
 		return 0;
 
-	if (pulsar_macro_is_valid(device, macro))
-		return 0;
+	if (!pulsar_macro_is_valid(device, macro))
+		return RATBAG_ERROR_VALUE;
 
-	return RATBAG_ERROR_VALUE;
+	switch (macro->repeat_mode) {
+	case RATBAG_MACRO_REPEAT_ONCE:
+	case RATBAG_MACRO_REPEAT_WHILE_HELD:
+	case RATBAG_MACRO_REPEAT_UNTIL_BUTTON_PRESSED:
+		break;
+	case RATBAG_MACRO_REPEAT_COUNT:
+		if (macro->repeat_count == 0 || macro->repeat_count > 0xFD) {
+			log_error(device->ratbag,
+				"%s: invalid macro repeat count %u (valid: 1-253)\n",
+				__func__, macro->repeat_count);
+			return RATBAG_ERROR_VALUE;
+		}
+		break;
+	default:
+		log_error(device->ratbag,
+			"%s: unsupported macro repeat mode %d\n",
+			__func__, macro->repeat_mode);
+		return RATBAG_ERROR_VALUE;
+	}
+
+	return 0;
 }
 
 static int
@@ -2081,9 +2129,32 @@ pulsar_commit_btn_macro(struct ratbag_device *device,
 	if (rc < 0)
 		return rc;
 
+	uint8_t repeat_param;
+	switch (macro->repeat_mode) {
+	case RATBAG_MACRO_REPEAT_ONCE:
+		repeat_param = 0x01;
+		break;
+	case RATBAG_MACRO_REPEAT_COUNT:
+		if (macro->repeat_count == 0)
+			return RATBAG_ERROR_VALUE;
+		if (macro->repeat_count > 0xFD)
+			repeat_param = 0xFD;
+		else
+			repeat_param = (uint8_t)macro->repeat_count;
+		break;
+	case RATBAG_MACRO_REPEAT_WHILE_HELD:
+		repeat_param = 0xFE;
+		break;
+	case RATBAG_MACRO_REPEAT_UNTIL_BUTTON_PRESSED:
+		repeat_param = 0xFF;
+		break;
+	default:
+		return RATBAG_ERROR_VALUE;
+	}
+
 	return pulsar_write_button_assignment(device, button_index,
 					      PULSAR_BTN_MODE_MACRO,
-					      button_index, 0x01);
+					      button_index, repeat_param);
 }
 
 static int
