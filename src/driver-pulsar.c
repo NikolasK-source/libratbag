@@ -319,7 +319,7 @@ pulsar_hz_to_polling_rate(unsigned int hz)
 	case 500:  return PULSAR_RATE_500;
 	case 250:  return PULSAR_RATE_250;
 	case 125:  return PULSAR_RATE_125;
-	default:   return PULSAR_RATE_1000;
+	default:   return 0;
 	}
 }
 
@@ -388,7 +388,7 @@ pulsar_count_event(const struct ratbag_device *device,
 	default:
 		log_bug_libratbag(device->ratbag,
 			"%s: unknown event type %02x\n", __func__,
-			(int)payload->data[0]);
+			(int)payload->data[4]);
 	}
 }
 
@@ -547,7 +547,7 @@ pulsar_write_active_profile(struct ratbag_device *device, uint8_t index)
 	if (rc < 0)
 		return rc;
 
-	if (response.data[4] != index) {
+	if (rc != index) {
 		log_bug_libratbag(device->ratbag,
 			"%s: active profile was not set\n", __func__);
 	}
@@ -814,7 +814,7 @@ pulsar_read_macro (struct ratbag_device *device,
 	const uint8_t checksum = *((uint8_t *)macro + chk_offset + chk_len);
 	if (expected != checksum) {
 		log_error(device->ratbag,
-			"invalid combination checksum %02x != %02x profile=%lu index=%lu\n",
+			"invalid macro checksum %02x != %02x profile=%lu index=%lu\n",
 			expected, checksum, profile, index);
 		macro->num_actions = 0;
 	}
