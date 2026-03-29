@@ -1636,32 +1636,22 @@ pulsar_macro_is_combo(const struct ratbag_device *device,
 			return false;
 		case RATBAG_MACRO_EVENT_NONE:
 		case RATBAG_MACRO_EVENT_INVALID:
-			if (count == 0) {
-				log_info(device->ratbag,
-					"macro is not a combo: no actions\n");
-				return false;
-			}
-			if (count > PULSAR_COMB_NUM_ACTIONS) {
-				log_info(device->ratbag,
-					"macro is not a combo: %u actions exceeds limit of %u\n",
-					count, PULSAR_COMB_NUM_ACTIONS);
-				return false;
-			}
-			if (presses != (count - presses)) {
-				log_info(device->ratbag,
-					"macro is not a combo: %u presses, %u releases\n",
-					presses, count - presses);
-				return false;
-			}
-			return true;
+			goto done;
 		}
 	}
 
-	if (count == 0 || count > PULSAR_COMB_NUM_ACTIONS ||
-	    presses != (count - presses)) {
+done:
+	if (count == 0) {
 		log_info(device->ratbag,
-			"macro is not a combo: %u actions, %u presses\n",
-			count, presses);
+			"macro is not a combo: no actions\n");
+		return false;
+	}
+
+	/* missing releases will be appended */
+	if (presses * 2 > PULSAR_COMB_NUM_ACTIONS) {
+		log_info(device->ratbag,
+			"macro is not a combo: %u actions exceeds limit of %u\n",
+			presses * 2, PULSAR_COMB_NUM_ACTIONS);
 		return false;
 	}
 
@@ -1744,27 +1734,23 @@ pulsar_macro_is_valid(const struct ratbag_device *device,
 			break;
 		case RATBAG_MACRO_EVENT_NONE:
 		case RATBAG_MACRO_EVENT_INVALID:
-			break;
+			goto done;
 		}
 	}
 
+done:
 	if (actions == 0) {
 		log_error(device->ratbag,
 			"%s: invalid macro: no actions\n", __func__);
 		return false;
 	}
 
-	if (actions > PULSAR_MACRO_NUM_ACTIONS) {
+	/* missing releases will be appended */
+	if (actions + num_pressed > PULSAR_MACRO_NUM_ACTIONS) {
 		log_error(device->ratbag,
 			"%s: invalid macro: %u actions exceeds limit of %u\n",
-			__func__, actions, PULSAR_MACRO_NUM_ACTIONS);
-		return false;
-	}
-
-	if (num_pressed > 0) {
-		log_error(device->ratbag,
-			"%s: invalid macro: %u key(s) still pressed at end\n",
-			__func__, num_pressed);
+			__func__, actions + num_pressed,
+			PULSAR_MACRO_NUM_ACTIONS);
 		return false;
 	}
 
@@ -2106,6 +2092,33 @@ pulsar_commit_btn_combo(struct ratbag_device *device,
 		ai++;
 	}
 
+	/* append missing releases for any press without a matching release */
+	const unsigned int encoded = ai;
+	for (unsigned int i = 0; i < encoded; i++) {
+		if (comb.actions[i].code < 0x80)
+			continue;
+
+		bool has_release = false;
+		for (unsigned int j = i + 1; j < encoded; j++) {
+			if (comb.actions[j].code == comb.actions[i].code - 0x40 &&
+			    comb.actions[j].value == comb.actions[i].value) {
+				has_release = true;
+				break;
+			}
+		}
+		if (!has_release) {
+			if (ai >= PULSAR_COMB_NUM_ACTIONS)
+				return RATBAG_ERROR_VALUE;
+			comb.actions[ai].code = comb.actions[i].code - 0x40;
+			comb.actions[ai].value = comb.actions[i].value;
+			log_debug(device->ratbag,
+				"%s: appending release for action %u (code=0x%02x value=0x%04x)\n",
+				__func__, i, comb.actions[i].code,
+				le16toh(comb.actions[i].value));
+			ai++;
+		}
+	}
+
 	/*
 	 * Sort actions: modifier presses, key presses, consumer presses,
 	 * then releases in the same order.
@@ -2126,6 +2139,11 @@ pulsar_commit_btn_combo(struct ratbag_device *device,
 			sort_keys[j] = sort_keys[j - 1];
 			j--;
 		}
+		if (j != i)
+			log_debug(device->ratbag,
+				"%s: sorted action %u -> %u (code=0x%02x value=0x%04x)\n",
+				__func__, i, j, tmp.code,
+				le16toh(tmp.value));
 		comb.actions[j] = tmp;
 		sort_keys[j] = tmp_key;
 	}
@@ -2198,6 +2216,33 @@ pulsar_commit_btn_macro(struct ratbag_device *device,
 	/* attach trailing delay to the last action */
 	if (ai > 0 && pending_delay > 0)
 		mac.actions[ai - 1].delay = htobe16(pending_delay);
+
+	/* append missing releases for any press without a matching release */
+	const unsigned int encoded = ai;
+	for (unsigned int i = 0; i < encoded; i++) {
+		if (mac.actions[i].code < 0x80)
+			continue;
+
+		bool has_release = false;
+		for (unsigned int j = i + 1; j < encoded; j++) {
+			if (mac.actions[j].code == mac.actions[i].code - 0x40 &&
+			    mac.actions[j].value == mac.actions[i].value) {
+				has_release = true;
+				break;
+			}
+		}
+		if (!has_release) {
+			if (ai >= PULSAR_MACRO_NUM_ACTIONS)
+				return RATBAG_ERROR_VALUE;
+			mac.actions[ai].code = mac.actions[i].code - 0x40;
+			mac.actions[ai].value = mac.actions[i].value;
+			log_debug(device->ratbag,
+				"%s: appending release for action %u (code=0x%02x value=0x%04x)\n",
+				__func__, i, mac.actions[i].code,
+				le16toh(mac.actions[i].value));
+			ai++;
+		}
+	}
 
 	mac.num_actions = ai;
 
