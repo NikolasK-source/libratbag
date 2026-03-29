@@ -2172,7 +2172,16 @@ pulsar_commit_btn_macro(struct ratbag_device *device,
 	const uint16_t addr = PULSAR_MACRO_BASE_ADDR +
 			button_index * sizeof(mac);
 
-	// TODO: macro name ("ratbag <button>")
+	/* set macro slot name to "ratbag btn_<N>" */
+	char slot_name[16];
+	int slot_name_len = snprintf(slot_name, sizeof(slot_name),
+				     "ratbag btn_%u", button_index);
+	if (slot_name_len < 0)
+		slot_name_len = 0;
+	const size_t slot_name_chars = min((size_t)slot_name_len, ARRAY_LENGTH(mac.name));
+	for (size_t i = 0; i < slot_name_chars; i++)
+		mac.name[i] = htole16((uint16_t)(uint8_t)slot_name[i]);
+	mac.name_length = slot_name_chars * 2;
 
 	const int rc = pulsar_write_memory_area(device, addr,
 		(uint8_t *)&mac, sizeof(mac));
