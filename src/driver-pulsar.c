@@ -146,7 +146,7 @@
 
 /* Combinations */
 #define PULSAR_COMB_BASE_ADDR		0x0100
-#define PULSAR_COMB_NUM_ACTIONS		10
+#define PULSAR_COMB_NUM_ACTIONS		6
 
 /* Macros */
 #define PULSAR_MACRO_BASE_ADDR		0x0300
@@ -177,7 +177,7 @@ struct __attribute__((packed)) pulsar_combination
 	struct pulsar_combination_action actions[PULSAR_COMB_NUM_ACTIONS];
 	uint8_t checksum;
 };
-static_assert(sizeof(struct pulsar_combination) == 32,
+static_assert(sizeof(struct pulsar_combination) == 20,
 	"invalid combination size");
 
 struct __attribute__((packed)) pulsar_macro_action
@@ -1604,12 +1604,11 @@ pulsar_macro_is_combo(const struct ratbag_device *device,
 
 	unsigned int count = 0;
 	unsigned int presses = 0;
+	bool saw_release = false;
 
 	for (unsigned int i = 0; i < MAX_MACRO_EVENTS; i++) {
 		switch (macro->events[i].type) {
 		case RATBAG_MACRO_EVENT_KEY_PRESSED:
-			presses++;
-			// fallthrough
 		case RATBAG_MACRO_EVENT_KEY_RELEASED:
 			if (macro->events[i].event.key >= BTN_MOUSE &&
 			    macro->events[i].event.key <= BTN_TASK) {
@@ -1617,6 +1616,17 @@ pulsar_macro_is_combo(const struct ratbag_device *device,
 					"macro is not a combo: mouse key %u at event %u\n",
 					macro->events[i].event.key, i);
 				return false;
+			}
+			if (macro->events[i].type == RATBAG_MACRO_EVENT_KEY_PRESSED) {
+				if (saw_release) {
+					log_info(device->ratbag,
+						"macro is not a combo: press after release at event %u\n",
+						i);
+					return false;
+				}
+				presses++;
+			} else {
+				saw_release = true;
 			}
 			count++;
 			break;
@@ -1635,6 +1645,12 @@ pulsar_macro_is_combo(const struct ratbag_device *device,
 				log_info(device->ratbag,
 					"macro is not a combo: %u actions exceeds limit of %u\n",
 					count, PULSAR_COMB_NUM_ACTIONS);
+				return false;
+			}
+			if (presses != (count - presses)) {
+				log_info(device->ratbag,
+					"macro is not a combo: %u presses, %u releases\n",
+					presses, count - presses);
 				return false;
 			}
 			return true;
@@ -2090,6 +2106,30 @@ pulsar_commit_btn_combo(struct ratbag_device *device,
 		ai++;
 	}
 
+	/*
+	 * Sort actions: modifier presses, key presses, consumer presses,
+	 * then releases in the same order.
+	 * Press codes are 0x80/0x81/0x82, release codes are 0x40/0x41/0x42.
+	 * Map to sort key: presses get 0/1/2, releases get 3/4/5.
+	 */
+	uint8_t sort_keys[PULSAR_COMB_NUM_ACTIONS];
+	for (unsigned int i = 0; i < ai; i++) {
+		uint8_t c = comb.actions[i].code;
+		sort_keys[i] = (c >= 0x80) ? (c - 0x80) : (c - 0x40 + 3);
+	}
+	for (unsigned int i = 1; i < ai; i++) {
+		struct pulsar_combination_action tmp = comb.actions[i];
+		uint8_t tmp_key = sort_keys[i];
+		unsigned int j = i;
+		while (j > 0 && sort_keys[j - 1] > tmp_key) {
+			comb.actions[j] = comb.actions[j - 1];
+			sort_keys[j] = sort_keys[j - 1];
+			j--;
+		}
+		comb.actions[j] = tmp;
+		sort_keys[j] = tmp_key;
+	}
+
 	comb.count = ai;
 	size_t chk_len = 1 + ai * sizeof(*comb.actions);
 	((uint8_t *)&comb)[chk_len] = pulsar_checksum((uint8_t *)&comb,
@@ -2264,8 +2304,11 @@ pulsar_commit_button(struct ratbag_device *device,
 	case RATBAG_BUTTON_ACTION_TYPE_MACRO: {
 		const struct ratbag_macro *macro = button->action.macro;
 
-		if (pulsar_macro_is_combo(device, macro))
+		if (pulsar_macro_is_combo(device, macro)) {
+			log_debug(device->ratbag, "%s: macro is combo\n",
+				__func__);
 			return pulsar_commit_btn_combo(device, bi, macro);
+		}
 
 		return pulsar_commit_btn_macro(device, bi, macro);
 	}
