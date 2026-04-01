@@ -146,7 +146,9 @@
 
 /* Combinations */
 #define PULSAR_COMB_BASE_ADDR		0x0100
-#define PULSAR_COMB_NUM_ACTIONS		6
+#define PULSAR_COMB_MAX_KEYS		3
+#define PULSAR_COMB_NUM_ACTIONS		(PULSAR_COMB_MAX_KEYS * 2)
+#define PULSAR_COMB_SLOT_SIZE		32
 
 /* Macros */
 #define PULSAR_MACRO_BASE_ADDR		0x0300
@@ -175,9 +177,10 @@ struct __attribute__((packed)) pulsar_combination
 {
 	uint8_t count;
 	struct pulsar_combination_action actions[PULSAR_COMB_NUM_ACTIONS];
-	uint8_t checksum;
+	uint8_t padding[PULSAR_COMB_SLOT_SIZE - 1
+		- PULSAR_COMB_NUM_ACTIONS * sizeof(struct pulsar_combination_action)];
 };
-static_assert(sizeof(struct pulsar_combination) == 20,
+static_assert(sizeof(struct pulsar_combination) == PULSAR_COMB_SLOT_SIZE,
 	"invalid combination size");
 
 struct __attribute__((packed)) pulsar_macro_action
@@ -767,13 +770,13 @@ pulsar_read_combination (struct ratbag_device *device,
 		return 0;
 	}
 
-	// invalid count
+	// invalid count -> interpret as an empty combination
 	if (combination->count > PULSAR_COMB_NUM_ACTIONS) {
 		log_error(device->ratbag,
 			"%s: invalid combination count %u profile=%lu index=%lu\n",
 			__func__, combination->count, profile, index);
 		combination->count = 0;
-		return -EIO;
+		return 0;
 	}
 
 	// verify checksum (covers count byte + used actions only)
@@ -1648,10 +1651,10 @@ done:
 	}
 
 	/* missing releases will be appended */
-	if (presses * 2 > PULSAR_COMB_NUM_ACTIONS) {
+	if (presses > PULSAR_COMB_MAX_KEYS) {
 		log_info(device->ratbag,
-			"macro is not a combo: %u actions exceeds limit of %u\n",
-			presses * 2, PULSAR_COMB_NUM_ACTIONS);
+			"macro is not a combo: %u keys exceeds limit of %u\n",
+			presses, PULSAR_COMB_MAX_KEYS);
 		return false;
 	}
 
@@ -2121,7 +2124,7 @@ pulsar_commit_btn_combo(struct ratbag_device *device,
 
 	/*
 	 * Sort actions: modifier presses, key presses, consumer presses,
-	 * then releases in the same order.
+	 * then releases in the same order (mod, key, consumer).
 	 * Press codes are 0x80/0x81/0x82, release codes are 0x40/0x41/0x42.
 	 * Map to sort key: presses get 0/1/2, releases get 3/4/5.
 	 */
@@ -2456,8 +2459,24 @@ pulsar_commit_profile(struct ratbag_device *device,
 			return rc;
 	}
 
-	/* update dpi mode count */
+	/* update active dpi mode */
 	struct pulsar_data *drv_data = profile->drv_data;
+	uint8_t prev_active_dpi =
+		drv_data->memory[profile->index].settings[PULSAR_ADDR_ACTIVE_DPI_MODE];
+	ratbag_profile_for_each_resolution(profile, resolution) {
+		if (!resolution->is_active)
+			continue;
+		if (resolution->index != prev_active_dpi) {
+			const int rc = pulsar_write_setting_byte(device,
+				PULSAR_ADDR_ACTIVE_DPI_MODE,
+				resolution->index);
+			if (rc < 0)
+				return rc;
+		}
+		break;
+	}
+
+	/* update dpi mode count */
 	uint8_t prev_dpi_count =
 		drv_data->memory[profile->index].settings[PULSAR_ADDR_DPI_MODE_COUNT];
 	if (dpi_count != prev_dpi_count) {
@@ -2548,9 +2567,17 @@ pulsar_read_profile(struct ratbag_profile *profile)
 {
 	struct ratbag_device *device = profile->device;
 
-	int rc = pulsar_read_status(device);
-	if (rc < 0)
-		return rc;
+	size_t retries = DRV_INIT_RETRY;
+	int rc;
+	do {
+		rc = pulsar_read_status(device);
+		if (rc < 0)
+			return rc;
+		if (rc || !retries--)
+			break;
+		sleep(DRV_RETRY_DELAY_S);
+	} while (true);
+
 	if (rc == 0) {
 		log_error(device->ratbag,
 			  "%s: device not responding (mouse asleep?)\n",
@@ -2618,6 +2645,13 @@ pulsar_handle_profile_event(struct ratbag_device *device)
 
 	struct pulsar_data *drv_data = device->drv_data;
 	drv_data->active_profile = active_profile;
+
+	struct ratbag_profile *profile;
+	ratbag_device_for_each_profile(device, profile) {
+		profile->is_active =
+			(profile->index == (unsigned)active_profile);
+	}
+
 	log_info(device->ratbag,
 		"%s: active profile %d\n", __func__, active_profile);
 }
@@ -2653,7 +2687,7 @@ pulsar_handle_event(struct ratbag_device *device,
 	case PULSAR_EVENT_PROFILE:
 		log_debug(device->ratbag, "%s: received profile event\n", __func__);
 		pulsar_handle_profile_event(device);
-		return RATBAG_EVENT_RESOLUTION_CHANGED;
+		return RATBAG_EVENT_PROFILE_CHANGED;
 	case PULSAR_EVENT_POWER:
 		log_debug(device->ratbag, "%s: received power event\n", __func__);
 		return RATBAG_EVENT_BATTERY_CHANGED;
