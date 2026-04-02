@@ -421,7 +421,11 @@ pulsar_read_response(const struct ratbag_device *device,
 			return rc;
 
 		if (payload->cmd == PULSAR_CMD_DEVICE_EVENT) {
-			pulsar_count_event(device, payload);
+			if (pulsar_is_payload_ok(payload))
+				pulsar_count_event(device, payload);
+			else
+				log_error(device->ratbag,
+					"%s: bad checksum on event\n", __func__);
 			continue;
 		}
 
@@ -1572,7 +1576,7 @@ pulsar_probe(struct ratbag_device *device)
 		if (profile->is_active) {
 			rc = pulsar_read_profile_settings(profile);
 			if (rc < 0)
-				goto err_init;;
+				goto err_init;
 			profile->loaded = true;
 		}
 	}
@@ -2176,14 +2180,6 @@ pulsar_commit_btn_macro(struct ratbag_device *device,
 {
 	struct pulsar_macro mac = {0};
 
-	/* encode name */
-	const char *name = macro->name ? macro->name : "macro";
-	const size_t name_chars = min(strlen(name), 15u);
-
-	for (size_t i = 0; i < name_chars; i++)
-		mac.name[i] = htole16((uint16_t)(uint8_t)name[i]);
-	mac.name_length = name_chars * 2;
-
 	/* encode actions */
 	unsigned int ai = 0;
 	unsigned int pending_delay = 0;
@@ -2206,6 +2202,10 @@ pulsar_commit_btn_macro(struct ratbag_device *device,
 		/* attach accumulated delay to the previous action */
 		if (ai > 0)
 			mac.actions[ai - 1].delay = htobe16(pending_delay);
+		else if (pending_delay > 0)
+			log_info(device->ratbag,
+				"%s: dropping leading delay of %u ms\n",
+				__func__, pending_delay);
 		pending_delay = 0;
 
 		if (!pulsar_encode_action(device, ev,
@@ -2260,16 +2260,20 @@ pulsar_commit_btn_macro(struct ratbag_device *device,
 	const uint16_t addr = PULSAR_MACRO_BASE_ADDR +
 			button_index * sizeof(mac);
 
-	/* set macro slot name to "ratbag btn_<N>" */
+	/* encode name: use user-provided name if available, else generate one */
+	const char *name;
 	char slot_name[16];
-	int slot_name_len = snprintf(slot_name, sizeof(slot_name),
-				     "ratbag btn_%u", button_index);
-	if (slot_name_len < 0)
-		slot_name_len = 0;
-	const size_t slot_name_chars = min((size_t)slot_name_len, ARRAY_LENGTH(mac.name));
-	for (size_t i = 0; i < slot_name_chars; i++)
-		mac.name[i] = htole16((uint16_t)(uint8_t)slot_name[i]);
-	mac.name_length = slot_name_chars * 2;
+	if (macro->name && macro->name[0]) {
+		name = macro->name;
+	} else {
+		snprintf(slot_name, sizeof(slot_name),
+			 "ratbag btn_%u", button_index);
+		name = slot_name;
+	}
+	const size_t name_chars = min(strlen(name), ARRAY_LENGTH(mac.name));
+	for (size_t i = 0; i < name_chars; i++)
+		mac.name[i] = htole16((uint16_t)(uint8_t)name[i]);
+	mac.name_length = name_chars * 2;
 
 	const int rc = pulsar_write_memory_area(device, addr,
 		(uint8_t *)&mac, sizeof(mac));
